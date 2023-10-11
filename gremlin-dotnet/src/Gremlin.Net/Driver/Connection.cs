@@ -136,7 +136,32 @@ namespace Gremlin.Net.Driver
 
             try
             {
-                HandleReceivedMessage(receivedMsg);
+                var status = receivedMsg.Status;
+                status.ThrowIfStatusIndicatesError();
+
+                if (status.Code == ResponseStatusCode.Authenticate)
+                {
+                    Authenticate();
+                    return;
+                }
+
+                if (receivedMsg.RequestId == null) return;
+
+                _callbackByRequestId.TryGetValue(receivedMsg.RequestId.Value, out var responseHandler);
+                if (status.Code != ResponseStatusCode.NoContent)
+                {
+                    responseHandler?.HandleReceived(receivedMsg);
+                }
+
+                if (status.Code == ResponseStatusCode.Success || status.Code == ResponseStatusCode.NoContent)
+                {
+                    if (_cancellationByRequestId.TryRemove(receivedMsg.RequestId.Value, out var cancellation))
+                    {
+                        cancellation.Dispose();
+                    }
+                    responseHandler?.Finalize(status.Attributes);
+                    _callbackByRequestId.TryRemove(receivedMsg.RequestId.Value, out _);
+                }
             }
             catch (Exception e)
             {
@@ -157,36 +182,6 @@ namespace Gremlin.Net.Driver
 
         private static void ThrowMessageDeserializedNull() =>
             throw new InvalidOperationException("Received data deserialized into null object message. Cannot operate on it.");
-
-        private void HandleReceivedMessage(ResponseMessage<List<object>> receivedMsg)
-        {
-            var status = receivedMsg.Status;
-            status.ThrowIfStatusIndicatesError();
-
-            if (status.Code == ResponseStatusCode.Authenticate)
-            {
-                Authenticate();
-                return;
-            }
-
-            if (receivedMsg.RequestId == null) return;
-
-            _callbackByRequestId.TryGetValue(receivedMsg.RequestId.Value, out var responseHandler);
-            if (status.Code != ResponseStatusCode.NoContent)
-            {
-                responseHandler?.HandleReceived(receivedMsg);
-            }
-
-            if (status.Code == ResponseStatusCode.Success || status.Code == ResponseStatusCode.NoContent)
-            {
-                if (_cancellationByRequestId.TryRemove(receivedMsg.RequestId.Value, out var cancellation))
-                {
-                    cancellation.Dispose();
-                }
-                responseHandler?.Finalize(status.Attributes);
-                _callbackByRequestId.TryRemove(receivedMsg.RequestId.Value, out _);
-            }
-        }
 
         private void Authenticate()
         {
