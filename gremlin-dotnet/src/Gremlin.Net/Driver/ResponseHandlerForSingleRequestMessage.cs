@@ -30,27 +30,28 @@ namespace Gremlin.Net.Driver
 {
     internal class ResponseHandlerForSingleRequestMessage<T> : IResponseHandlerForSingleRequestMessage
     {
-        public Task<ResultSet<T>> Result => _tcs.Task;
+        public Task<byte[]> Result => _tcs.Task;
 
-        private readonly TaskCompletionSource<ResultSet<T>> _tcs =
-            new TaskCompletionSource<ResultSet<T>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<byte[]> _tcs =
+            new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         
         private readonly List<T> _result = new List<T>();
 
-        public void HandleReceived(ResponseMessage<List<object>> received)
+        public void HandleReceived(byte[] received)
         {
-            foreach (var d in received.Result.Data)
-            {
-                _result.Add((T) d);
-            }
+            _tcs.TrySetResult(received);
+            //foreach (var d in received.Result.Data)
+            //{
+            //    _result.Add((T) d);
+            //}
         }
 
-        public void Finalize(Dictionary<string, object> statusAttributes)
-        {
-            var resultSet =
-                new ResultSet<T>(_result, statusAttributes);
-            _tcs.TrySetResult(resultSet);
-        }
+        //public void Finalize(Dictionary<string, object> statusAttributes)
+        //{
+        //    var resultSet =
+        //        new ResultSet<T>(_result, statusAttributes);
+        //    _tcs.TrySetResult(resultSet);
+        //}
 
         public void HandleFailure(Exception objException)
         {

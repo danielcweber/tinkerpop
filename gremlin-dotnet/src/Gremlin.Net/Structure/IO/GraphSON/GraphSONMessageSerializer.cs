@@ -72,35 +72,47 @@ namespace Gremlin.Net.Structure.IO.GraphSON
         }
 
         /// <inheritdoc />
-        public virtual Task<ResponseMessage<List<object>>> DeserializeMessageAsync(byte[] message,
+        public virtual Task<ResponseMessage<List<T>>> DeserializeMessageAsync<T>(byte[] message,
             CancellationToken cancellationToken = default)
         {
             if (message == null) throw new ArgumentNullException(nameof(message));
             if (cancellationToken.CanBeCanceled) cancellationToken.ThrowIfCancellationRequested();
-            if (message.Length == 0) return Task.FromResult<ResponseMessage<List<object>>>(null);
+            if (message.Length == 0) return Task.FromResult<ResponseMessage<List<T>>>(null);
             
             var reader = new Utf8JsonReader(message);
             var responseMessage =
                 JsonSerializer.Deserialize<ResponseMessage<JsonElement>>(ref reader, JsonDeserializingOptions);
-            if (responseMessage == null) return Task.FromResult<ResponseMessage<List<object>>>(null);;
+            if (responseMessage == null) return Task.FromResult<ResponseMessage<List<T>>>(null);;
             
-            var data = _graphSONReader.ToObject(responseMessage.Result.Data);
-            return Task.FromResult(CopyMessageWithNewData(responseMessage, data));
+            var data = (T)_graphSONReader.ToObject(responseMessage.Result.Data);
+            return Task.FromResult(CopyMessageWithNewData<T>(responseMessage, data));
         }
 
-        private static ResponseMessage<List<object>> CopyMessageWithNewData(ResponseMessage<JsonElement> origMsg,
+        private static ResponseMessage<List<T>> CopyMessageWithNewData<T>(ResponseMessage<JsonElement> origMsg,
             dynamic data)
         {
-            return new ResponseMessage<List<object>>
+            return new ResponseMessage<List<T>>
             {
                 RequestId = origMsg.RequestId,
                 Status = origMsg.Status,
-                Result = new ResponseResult<List<object>>
+                Result = new ResponseResult<List<T>>
                 {
-                    Data = data == null ? null : new List<object>(data),
+                    Data = data == null ? null : new List<T>(data),
                     Meta = origMsg.Result.Meta
                 }
             };
+        }
+
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="message"></param>
+        /// <param name="cancellationToken"></param>
+        /// <returns></returns>
+        /// <exception cref="NotImplementedException"></exception>
+        public Task<(Guid? RequestId, ResponseStatus Status)?> TryGetRequestId(byte[] message, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
         }
     }
 }

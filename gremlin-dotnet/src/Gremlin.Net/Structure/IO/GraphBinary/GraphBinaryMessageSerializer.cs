@@ -81,11 +81,21 @@ namespace Gremlin.Net.Structure.IO.GraphBinary
         }
 
         /// <inheritdoc />
-        public async Task<ResponseMessage<List<object>>> DeserializeMessageAsync(byte[] message,
+        public async Task<ResponseMessage<List<T>>> DeserializeMessageAsync<T>(byte[] message,
             CancellationToken cancellationToken = default)
         {
             using var stream = new MemoryStream(message);
             return await _responseSerializer.ReadValueAsync(stream, _reader, cancellationToken).ConfigureAwait(false);
+        }
+
+        public Task<ResponseMessage<List<T>>> DeserializeMessageAsync<T>(byte[] message, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<(Guid? RequestId, ResponseStatus Status)?> TryGetRequestId(byte[] message, CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
         }
     }
 }

@@ -34,8 +34,8 @@ namespace Gremlin.Net.Driver
 {
     internal interface IResponseHandlerForSingleRequestMessage
     {
-        void HandleReceived(ResponseMessage<List<object>> received);
-        void Finalize(Dictionary<string, object> statusAttributes);
+        void HandleReceived(byte[] received);
+        //void Finalize(Dictionary<string, object> statusAttributes);
         void HandleFailure(Exception objException);
         void Cancel();
     }
@@ -85,7 +85,7 @@ namespace Gremlin.Net.Driver
 
         public bool IsOpen => _webSocketConnection.IsOpen && Volatile.Read(ref _connectionState) != Closed;
 
-        public Task<ResultSet<T>> SubmitAsync<T>(RequestMessage requestMessage, CancellationToken cancellationToken)
+        public async Task<ResultSet<T>> SubmitAsync<T>(RequestMessage requestMessage, CancellationToken cancellationToken)
         {
             var receiver = new ResponseHandlerForSingleRequestMessage<T>();
             _callbackByRequestId.GetOrAdd(requestMessage.RequestId, receiver);
@@ -99,7 +99,11 @@ namespace Gremlin.Net.Driver
             }));
             _writeQueue.Enqueue((requestMessage, cancellationToken));
             BeginSendingMessages();
-            return receiver.Result;
+
+            var received = await receiver.Result;
+            var response = await _messageSerializer.DeserializeMessageAsync<T>(received, cancellationToken);
+
+            return new ResultSet<T>(response.Result.Data, response.Status.Attributes);
         }
 
         private void BeginReceiving()
@@ -128,55 +132,58 @@ namespace Gremlin.Net.Driver
 
         private async Task HandleReceivedAsync(byte[] received)
         {
-            var receivedMsg = await _messageSerializer.DeserializeMessageAsync(received).ConfigureAwait(false);
-            if (receivedMsg == null)
+            var maybeDataTuple = await _messageSerializer.TryGetRequestId(received).ConfigureAwait(false);
+
+            if (maybeDataTuple is { } dataTuple)
+            {
+                try
+                {
+                    var status = dataTuple.Status;
+                    status.ThrowIfStatusIndicatesError();
+
+                    if (status.Code == ResponseStatusCode.Authenticate)
+                    {
+                        Authenticate();
+                        return;
+                    }
+
+                    if (dataTuple.RequestId is { } requestId)
+                    {
+                        _callbackByRequestId.TryGetValue(requestId, out var responseHandler);
+                        if (status.Code != ResponseStatusCode.NoContent)
+                        {
+                            responseHandler?.HandleReceived(received);
+                        }
+
+                        if (status.Code == ResponseStatusCode.Success || status.Code == ResponseStatusCode.NoContent)
+                        {
+                            if (_cancellationByRequestId.TryRemove(requestId, out var cancellation))
+                            {
+                                cancellation.Dispose();
+                            }
+                            _callbackByRequestId.TryRemove(requestId, out _);
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (dataTuple.RequestId is { } requestId)
+                    {
+                        if (_callbackByRequestId.TryRemove(requestId, out var responseHandler))
+                        {
+                            responseHandler?.HandleFailure(e);
+
+                        }
+                        if (_cancellationByRequestId.TryRemove(requestId, out var cancellation))
+                        {
+                            cancellation.Dispose();
+                        }
+                    }
+                }
+            }
+            else
             {
                 ThrowMessageDeserializedNull();
-            }
-
-            try
-            {
-                var status = receivedMsg.Status;
-                status.ThrowIfStatusIndicatesError();
-
-                if (status.Code == ResponseStatusCode.Authenticate)
-                {
-                    Authenticate();
-                    return;
-                }
-
-                if (receivedMsg.RequestId == null) return;
-
-                _callbackByRequestId.TryGetValue(receivedMsg.RequestId.Value, out var responseHandler);
-                if (status.Code != ResponseStatusCode.NoContent)
-                {
-                    responseHandler?.HandleReceived(receivedMsg);
-                }
-
-                if (status.Code == ResponseStatusCode.Success || status.Code == ResponseStatusCode.NoContent)
-                {
-                    if (_cancellationByRequestId.TryRemove(receivedMsg.RequestId.Value, out var cancellation))
-                    {
-                        cancellation.Dispose();
-                    }
-                    responseHandler?.Finalize(status.Attributes);
-                    _callbackByRequestId.TryRemove(receivedMsg.RequestId.Value, out _);
-                }
-            }
-            catch (Exception e)
-            {
-                if (receivedMsg!.RequestId != null)
-                {
-                    if(_callbackByRequestId.TryRemove(receivedMsg.RequestId.Value, out var responseHandler))
-                    {
-                        responseHandler?.HandleFailure(e);
-                        
-                    }
-                    if (_cancellationByRequestId.TryRemove(receivedMsg.RequestId.Value, out var cancellation))
-                    {
-                        cancellation.Dispose();
-                    }
-                }
             }
         }
 
